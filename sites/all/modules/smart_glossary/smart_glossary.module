@@ -1,0 +1,538 @@
+<?php
+
+/**
+ * @file
+ * The module file of the Smart Glossary module.
+ */
+
+/**
+ * Implements hook_permission().
+ */
+function smart_glossary_permission() {
+  return array(
+    'administer smart glossary' => array(
+      'title' => t('Administer the Smart Glossary'),
+      'description' => t('Perform administration tasks for the Smart Glossary.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function smart_glossary_menu() {
+  $items = array();
+
+  // Smart Glossary administration settings form.
+  $items['admin/config/semantic-drupal/smart-glossary'] = array(
+    'title' => 'Smart Glossary',
+    'description' => 'Manage Smart Glossary configurations',
+    'page callback' => 'smart_glossary_admin_list',
+    'access arguments' => array('administer smart glossary'),
+    'file' => 'includes/smart_glossary.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/config/semantic-drupal/smart-glossary/add'] = array(
+    'title' => 'Add a Smart Glossary configuration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('smart_glossary_admin_form'),
+    'access arguments' => array('administer smart glossary'),
+    'file' => 'includes/smart_glossary.admin.inc',
+    'type' => MENU_LOCAL_ACTION,
+  );
+
+  // Add a SmartGlossary configuration for a fixed SPARQL server connection.
+  // @arg 5 The connection ID of the SPARQL endpoint connection.
+  $items['admin/config/semantic-drupal/smart-glossary/add/%'] = array(
+    'title' => 'Add a SmartGlossary configuration for a specified connection',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('smart_glossary_add_config_for_fixed_connection_form', 5),
+    'access arguments' => array('administer smart glossary'),
+    'file' => 'includes/smart_glossary.admin.inc',
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['admin/config/semantic-drupal/smart-glossary/%smart_glossary_config'] = array(
+    'title callback' => 'smart_glossary_config_title',
+    'title arguments' => array(4),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('smart_glossary_admin_form', 4),
+    'access arguments' => array('administer smart glossary'),
+    'file' => 'includes/smart_glossary.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/config/semantic-drupal/smart-glossary/%smart_glossary_config/edit'] = array(
+    'title' => 'Edit a Smart Glossary configuration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('smart_glossary_admin_form', 4),
+    'access arguments' => array('administer smart glossary'),
+    'file' => 'includes/smart_glossary.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+    'context' => MENU_CONTEXT_PAGE | MENU_CONTEXT_INLINE,
+  );
+
+  $items['admin/config/semantic-drupal/smart-glossary/%smart_glossary_config/clone'] = array(
+    'title' => 'Clone a Smart Glossary configuration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('smart_glossary_clone_form', 4),
+    'access arguments' => array('administer smart glossary'),
+    'file' => 'includes/smart_glossary.admin.inc',
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['admin/config/semantic-drupal/smart-glossary/%smart_glossary_config/delete'] = array(
+    'title' => 'Delete a Smart Glossary configuration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('smart_glossary_delete_form', 4),
+    'access arguments' => array('administer smart glossary'),
+    'file' => 'includes/smart_glossary.admin.inc',
+    'type' => MENU_CALLBACK,
+  );
+
+  $configs = smart_glossary_config_load();
+  foreach ($configs as $config) {
+    // Base path has to be set.
+    if ($config->base_path == '<none>') {
+      continue;
+    }
+
+    $base_path = $config->base_path;
+    $additional_paths_count = substr_count($base_path, '/');
+
+    // Smart Glossary start page.
+    $items[$base_path] = array(
+      'title' => 'Glossary',
+      'page callback' => '_smart_glossary_start',
+      'access callback' => TRUE,
+      'file' => 'includes/smart_glossary.inc',
+      'type' => MENU_NORMAL_ITEM,
+    );
+
+    /*
+     * Smart Glossary start page with selected language.
+     * Argument 1: language-iso-code.
+     */
+    $items[$base_path . '/%'] = array(
+      'title' => 'Glossary',
+      'page callback' => '_smart_glossary_start',
+      'page arguments' => array(1 + $additional_paths_count),
+      'access callback' => TRUE,
+      'file' => 'includes/smart_glossary.inc',
+      'type' => MENU_NORMAL_ITEM,
+    );
+
+    /*
+     * Glossary Character and language list or
+     * Glossary Detail-view of a concept with the Visual Mapper
+     * depending on the request parameter 'uri'.
+     *
+     * Argument 1: language-iso-code.
+     * Argument 2: character (a-z), "all" or the label of a concept.
+     */
+    $items[$base_path . '/%/%'] = array(
+      'title' => 'Glossary List',
+      'page callback' => '_smart_glossary_view',
+      'page arguments' => array(2 + $additional_paths_count, 1 + $additional_paths_count),
+      'access callback' => TRUE,
+      'file' => 'includes/smart_glossary.inc',
+      'type' => MENU_NORMAL_ITEM,
+    );
+  }
+
+  // AJAX autocomplete callback for the concepts.
+  $items['smart-glossary/search/%'] = array(
+    'title' => 'Glossary Concept Autocomplete',
+    'page callback' => '_smart_glossary_concept_autocomplete',
+    'page arguments' => array(2),
+    'access callback' => TRUE,
+    'file' => 'includes/smart_glossary.inc',
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['smart-glossary/get-visual-mapper-data/%'] = array(
+    'title' => 'Get the data in JSON format for the Visual Mapper',
+    'page callback' => '_smart_glossary_get_visual_mapper_data',
+    'page arguments' => array(2),
+    'access callback' => TRUE,
+    'file' => 'includes/smart_glossary.inc',
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function smart_glossary_block_info() {
+  $blocks = array();
+  $configs = smart_glossary_config_load();
+  foreach ($configs as $config) {
+    $blocks['smart_glossary_' . $config->sg_id] = array(
+      'info' => 'Smart Glossary "' . $config->title . '"',
+    );
+  }
+
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function smart_glossary_block_view($block_name) {
+  $block = array();
+
+  if (strpos($block_name, 'smart_glossary_') === 0) {
+    // Include the callbacks from smart_glossary.inc
+    module_load_include('inc', 'smart_glossary', 'includes/smart_glossary');
+
+    $block = array(
+      'subject' => t('Smart Glossary'),
+      'content' => array(
+        '#type' => 'markup',
+        '#markup' => _smart_glossary_start(),
+        '#contextual_links' => array(
+          'smart_glossary' => array(
+            'admin/config/semantic-drupal/smart-glossary',
+            array(str_replace('smart_glossary_', '', $block_name)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  return $block;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function smart_glossary_theme($existing, $type, $theme, $path) {
+  return array(
+    // The Header: A-Z, languages, ...
+    'smart_glossary_header' => array(
+      'variables' => array(
+        'base_path' => '',
+        'character_list' => NULL,
+        'current_language' => '',
+      ),
+      'template' => 'templates/smart_glossary_header',
+    ),
+    // The start page of the glossary.
+    'smart_glossary_start' => array(
+      'variables' => array(
+        'base_path' => '',
+        'visual_mapper_available' => FALSE,
+        'visual_mapper_settings' => '',
+        'current_language' => '',
+      ),
+      'template' => 'templates/smart_glossary_start',
+    ),
+    // A list of concepts to choose from.
+    'smart_glossary_list' => array(
+      'variables' => array(
+        'list' => NULL,
+      ),
+      'template' => 'templates/smart_glossary_list',
+    ),
+    // A detailed view of a concept with the visual mapper.
+    'smart_glossary_detail' => array(
+      'variables' => array(
+        'base_path' => '',
+        'visual_mapper_available' => FALSE,
+        'term' => NULL,
+        'visual_mapper_settings' => '',
+        'current_language' => '',
+        'rdf_url' => '',
+        'endpoint_url' => '',
+      ),
+      'template' => 'templates/smart_glossary_detail',
+    ),
+    // The Visual Mapper.
+    'smart_glossary_visual_mapper' => array(
+      'variables' => array(
+        'base_path' => '',
+        'visual_mapper_available' => FALSE,
+        'concept_uri' => '',
+        'visual_mapper_settings' => '',
+        'current_language' => '',
+      ),
+      'template' => 'templates/smart_glossary_visual_mapper',
+    ),
+  );
+}
+
+/**
+ * Implements hook_cron().
+ */
+function smart_glossary_cron() {
+  $configs = smart_glossary_config_load(NULL, TRUE);
+  foreach ($configs as $config) {
+    $advanced_settings = $config->advanced_settings;
+    if (time() >= $advanced_settings['next_run']) {
+      _smart_glossary_update_character_list($config);
+      $advanced_settings['next_run'] = time() + $advanced_settings['interval'];
+      db_update('smart_glossary')
+        ->fields(array(
+          'advanced_settings' => serialize($advanced_settings),
+        ))
+        ->condition('sg_id', $config->sg_id)
+        ->execute();
+    }
+  }
+}
+
+/**
+ * Title callback for edit a Smart Glossary configuration.
+ *
+ * @param object $config
+ *   The Smart Glossary configuration object.
+ *
+ * @return string
+ *   The title.
+ */
+function smart_glossary_config_title($config) {
+  if (empty($config)) {
+    return t('Edit Smart Glossary configuration "unknown"');
+  }
+  return t('Edit Smart Glossary configuration "!title"', array('!title' => $config->title));
+}
+
+/**
+ * Implementation of hook_features_api().
+ *
+ * Allow exporting of Smart Glossary configurations with the Features module.
+ */
+function smart_glossary_features_api() {
+  return array(
+    'smart_glossary_config' => array(
+      'name' => t('Smart Glossary configurations'),
+      'feature_source' => TRUE,
+      'default_hook' => 'smart_glossary_config_features_settings',
+      'default_file' => FEATURES_DEFAULTS_INCLUDED,
+      'file' => drupal_get_path('module', 'smart_glossary') . '/includes/smart_glossary.features.inc',
+    )
+  );
+}
+
+/**
+ * Loads all Smart Glossary configurations or one if $sg_id is given.
+ *
+ * @param int $sg_id
+ *   ID of the Smart Glossary configuration ID.
+ * @param bool $only_available_services
+ *   Get only SPARQL endpoints, which currently can be reached.
+ *
+ * @return object
+ *   All (or one) Smart Glossary configuration set.
+ */
+function smart_glossary_config_load($sg_id = NULL, $only_available_services = FALSE) {
+  if (is_null($sg_id) || (int) $sg_id <= 0) {
+    $result = db_query("SELECT * FROM {smart_glossary} ORDER BY sg_id");
+  }
+  else {
+    $result = db_query("SELECT * FROM {smart_glossary} WHERE sg_id = :sg_id", array(':sg_id' => $sg_id));
+  }
+
+  $config = array();
+  foreach ($result as $record) {
+    $record->language_mapping = unserialize($record->language_mapping);
+    $record->visual_mapper_settings = unserialize($record->visual_mapper_settings);
+    $record->advanced_settings = unserialize($record->advanced_settings);
+    $record->connection = SemanticConnector::getConnection('sparql_endpoint', $record->connection_id);
+
+    if ($only_available_services) {
+      if (!$record->connection->available()) {
+        continue;
+      }
+    }
+
+    $config[] = $record;
+  }
+
+  return (is_null($sg_id) || !isset($config[0])) ? $config : $config[0];
+}
+
+/**
+ * Loads the default values for a SmartGlossary configuration.
+ *
+ * @return object
+ *   The default object of a SmartGlossary configuration set.
+ */
+function smart_glossary_default_config_load() {
+  $config = new stdClass();
+  $config->title = '';
+  $config->base_path = 'glossary';
+  $config->connection_id = 0;
+  $config->connection = SemanticConnector::getConnection('sparql_endpoint', $config->connection_id);
+  $config->language_mapping = array();
+  $config->visual_mapper_settings = array();
+  $config->advanced_settings = array();
+
+  return $config;
+}
+
+/**
+ * Loads a Smart Glossary configuration from current path.
+ *
+ * @param string $current_path
+ *   The current path
+ *
+ * @return object
+ *   The Smart Glossary configuration object
+ */
+function smart_glossary_current_config_load($current_path = '') {
+  static $config = NULL;
+
+  if (is_null($config)) {
+    if (empty($current_path)) {
+      if (!($current_path = drupal_lookup_path('alias', current_path()))) {
+        $current_path = current_path();
+      }
+    }
+    $current_path .= '/';
+    $configs = smart_glossary_config_load();
+
+    foreach ($configs as $config) {
+      $base_path = $config->base_path . '/';
+      if (strpos($current_path, $base_path) === 0) {
+        break;
+      }
+    }
+  }
+
+  return $config;
+}
+
+/**
+ * Update the character list for all configured languages.
+ *
+ * @param object $config
+ *   The Smart Glossary configuration
+ *
+ * @return bool
+ *   TRUE if the character lists could be updated, FALSE if not
+ */
+function _smart_glossary_update_character_list($config) {
+  $sg = SmartGlossary::getInstance($config);
+  $advanced_settings = $sg->updateCharacterList();
+
+  db_update('smart_glossary')
+    ->fields(array(
+      'advanced_settings' => serialize($advanced_settings),
+    ))
+    ->condition('sg_id', $config->sg_id)
+    ->execute();
+  drupal_set_message(t('Successfully updated the character list for all configured languages. Unused letters are greyed out now.'));
+
+  return TRUE;
+}
+
+/**
+ * Get an array of all available languages.
+ *
+ * @param object $config
+ *   The Smart Glossary configuration object.
+ *
+ * @return array
+ *   An array of language-iso-strings
+ */
+function _smart_glossary_get_available_languages($config = NULL) {
+  if (is_null($config)) {
+    $config = smart_glossary_current_config_load();
+  }
+  $language_mapping = $config->language_mapping;
+  $languages = array();
+  if (is_array($language_mapping) && !empty($language_mapping)) {
+    foreach ($language_mapping as $mapping) {
+      if (isset($mapping['glossary_languages'])) {
+        $languages = array_merge($languages, $mapping['glossary_languages']);
+      }
+    }
+  }
+  return ((!empty($languages)) ? array_unique($languages) : array(language_default('language')));
+}
+
+/**
+ * Find out the current language.
+ *
+ * @param array $variables
+ *   Array of avaialble variables, that possibly includes a "language"-key
+ *
+ * @return string
+ *   The iso-code of the current language
+ */
+function _smart_glossary_get_current_language($variables = array()) {
+  // From the variables-array.
+  if (isset($variables['current_language'])) {
+    return $variables['current_language'];
+  }
+  // From the current browser-session.
+  elseif (isset($_SESSION['smart_glossary_language']) && isset($variables['sg_id'])) {
+    return $_SESSION['smart_glossary_language'][$variables['sg_id']];
+  }
+  // From the first value of all available languages (default).
+  else {
+    $glossary_languages = _smart_glossary_get_available_languages();
+    return $glossary_languages[0];
+  }
+}
+
+/**
+ * Set the current language session.
+ *
+ * @param string $glossary_language
+ *   Language-iso-code
+ */
+function _smart_glossary_set_language($glossary_language = NULL) {
+  global $language;
+
+  $config = smart_glossary_current_config_load();
+  $language_mapping = $config->language_mapping;
+  $mapping_exists = isset($language_mapping[$language->language]) && !empty($language_mapping[$language->language]['glossary_languages']);
+  $glossary_languages = $mapping_exists ? $language_mapping[$language->language]['glossary_languages'] : array();
+
+  if (is_null($glossary_language) || !in_array($glossary_language, $glossary_languages)) {
+    $glossary_language = empty($glossary_languages) ? language_default('language') : $glossary_languages[0];
+  }
+
+  $_SESSION['smart_glossary_language'][$config->sg_id] = $glossary_language;
+}
+
+
+/**
+ * Set the breadcrumb for the current site.
+ */
+function _smart_glossary_set_breadcrumb() {
+  $uri = drupal_get_path_alias();
+  $trail = array();
+  $i = 0;
+  while ($uri && $uri != '.') {
+    $path = drupal_lookup_path('source', $uri);
+    $item = menu_get_item($path);
+    $trail[$i]['title'] = $item['title'];
+    $trail[$i]['path'] = check_url($uri);
+    $uri = dirname($uri);
+    $i++;
+  }
+  $trail = array_reverse($trail);
+  $breadcrumb = array(l(t('Home'), '<front>'));
+  foreach ($trail as $c) {
+    if (isset($c['title']) && isset($c['path'])) {
+      $breadcrumb[] = l($c['title'], $c['path']);
+    }
+  }
+  drupal_set_breadcrumb($breadcrumb);
+}
+
+/**
+ * Find out if the Visual Mapper exists.
+ *
+ * @return bool
+ *   TRUE if the Visual Mapper exists, FALSE if not
+ */
+function _smart_glossary_visual_mapper_exists() {
+  return (module_exists('libraries') && file_exists(libraries_get_path('visual_mapper') . "/visual_mapper.min.js"));
+}

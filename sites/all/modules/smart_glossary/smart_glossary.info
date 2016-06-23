@@ -1,0 +1,17 @@
+name = Smart Glossary
+description = A glossary presented via a relation browser
+package = Semantic Drupal
+core = 7.x
+
+configure = admin/config/semantic-drupal/smart-glossary
+
+dependencies[] = semantic_connector
+
+files[] = includes/smart_glossary.class.php
+
+; Information added by Drupal.org packaging script on 2016-02-12
+version = "7.x-2.0-beta1"
+core = "7.x"
+project = "smart_glossary"
+datestamp = "1455270843"
+

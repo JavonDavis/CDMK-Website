@@ -1,0 +1,153 @@
+<?php
+
+/**
+ * @file
+ * Smart Glossary install/uninstall routines.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function smart_glossary_schema() {
+  $schema['smart_glossary'] = array(
+    'description' => 'Table that stores the configuration of Smart Glossary instances.',
+    'fields' => array(
+      'sg_id' => array(
+        'description' => 'Primary key: Unique Smart Glossary ID',
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'connection_id' => array(
+        'description' => 'ID of the Semantic Module Connector Connection',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'title' => array(
+        'description' => 'Title of a Smart Glossary configuration',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+      ),
+      'base_path' => array(
+        'description' => 'The path where the Smart Glossary page can be found',
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => FALSE,
+      ),
+      'language_mapping' => array(
+        'description' => 'The language map between Drupal and SKOS languages',
+        'type' => 'blob',
+        'size' => 'big',
+        'not null' => FALSE,
+      ),
+      'visual_mapper_settings' => array(
+        'description' => 'Settings for the Visual Mapper, if is installed',
+        'type' => 'blob',
+        'size' => 'big',
+        'not null' => FALSE,
+      ),
+      'advanced_settings' => array(
+        'description' => 'Additional settings.',
+        'type' => 'blob',
+        'size' => 'big',
+        'not null' => FALSE,
+      ),
+    ),
+    'primary key' => array('sg_id'),
+    'unique keys' => array('base_path' => array('base_path')),
+  );
+
+  return $schema;
+}
+
+/**
+ * Moving variable data into a new Smart Glossary table.
+ */
+function smart_glossary_update_7000() {
+  // Create new Smart Glossary configuration table.
+  if (!db_table_exists('smart_glossary')) {
+    drupal_install_schema('smart_glossary');
+  }
+
+  // Move data from variables into the new table.
+  smart_glossary_move_data();
+
+  // Delete the old Relation Browser files.
+  $directory = 'public://relation_browser';
+  if (file_prepare_directory($directory, FILE_MODIFY_PERMISSIONS)) {
+    file_unmanaged_delete_recursive($directory);
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function smart_glossary_move_data() {
+  if (variable_get('smart_glossary_url', '') != '') {
+    $language_settings = array();
+    $languages = variable_get('smart_glossary_languages', array());
+    foreach ($languages as $language => $data) {
+      $language_settings[$data['page_language']] = array(
+        'glossary_languages' => array($language),
+        'wording' => $data['wording'],
+      );
+    }
+    $advanced_settings = array(
+      'interval' => variable_get('smart_glossary_rb_regtime', 86400),
+      'next_run' => variable_get('smart_glossary_rb_nextreg', 0),
+      'char_a_z' => variable_get('smart_glossary_nodes_per_character', array()),
+      'semantic_connection' => array(),
+    );
+
+    // Add the previous connection-data as a Semantic Connector Connection.
+    $connection_id = db_insert('semantic_connector_connections')
+      ->fields(array(
+        'type' => 'sparql_endpoint',
+        'url' => variable_get('smart_glossary_url', ''),
+        'title' => 'SPARQL Endpoint',
+        'username' => variable_get('smart_glossary_username', ''),
+        'password' => variable_get('smart_glossary_password', ''),
+        'config' => serialize(array()),
+      ))
+      ->execute();
+
+    db_insert('smart_glossary')
+      ->fields(array(
+        'connection_id' => $connection_id,
+        'title' => 'Configuration 1',
+        'base_path' => variable_get('smart_glossary_base_path', ''),
+        'language_mapping' => serialize(variable_get('smart_glossary_languages', array())),
+        'visual_mapper_settings' => serialize(variable_get('smart_glossary_rb', array())),
+        'advanced_settings' => serialize($advanced_settings),
+      ))
+      ->execute();
+  }
+
+  // Unset all Smart Glossary variables.
+  variable_del('smart_glossary_base_path');
+  variable_del('smart_glossary_color_hasConceptScheme');
+  variable_del('smart_glossary_color_hasTopConcept');
+  variable_del('smart_glossary_color_narrower');
+  variable_del('smart_glossary_color_related');
+  variable_del('smart_glossary_languages');
+  variable_del('smart_glossary_languages_1');
+  variable_del('smart_glossary_languages_2');
+  variable_del('smart_glossary_languages_3');
+  variable_del('smart_glossary_languages_4');
+  variable_del('smart_glossary_languages_5');
+  variable_del('smart_glossary_languages_6');
+  variable_del('smart_glossary_languages_7');
+  variable_del('smart_glossary_languages_8');
+  variable_del('smart_glossary_languages_9');
+  variable_del('smart_glossary_languages_10');
+  variable_del('smart_glossary_language_options');
+  variable_del('smart_glossary_nodes_per_character');
+  variable_del('smart_glossary_password');
+  variable_del('smart_glossary_rb');
+  variable_del('smart_glossary_rb_nextreg');
+  variable_del('smart_glossary_rb_regtime');
+  variable_del('smart_glossary_url');
+  variable_del('smart_glossary_username');
+}

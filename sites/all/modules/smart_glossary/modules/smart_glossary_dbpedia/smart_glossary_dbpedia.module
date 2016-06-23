@@ -1,0 +1,140 @@
+<?php
+
+/**
+ * @file
+ * Smart Glossary DBPedia
+ */
+
+/**
+ * Implements hook_smart_glossary_related_resource().
+ */
+function smart_glossary_dbpedia_smart_glossary_related_resource($glossary_store, $concept_uri, $selected_language) {
+  // Create DBPedia domain.
+  $dbpedia_domain = 'dbpedia.org';
+  if ($selected_language != 'en') {
+    $dbpedia_domain = $selected_language . '.' . $dbpedia_domain;
+  }
+
+  // Create sparql query.
+  $query = "
+    PREFIX skos:<http://www.w3.org/2004/02/skos/core#>
+
+    SELECT *
+    WHERE {
+      <$concept_uri> a skos:Concept.
+      OPTIONAL {
+        <$concept_uri> skos:exactMatch ?dbpediaExactMatch  FILTER(regex(str(?dbpediaExactMatch), '^http://$dbpedia_domain', 'i'))
+      }
+      OPTIONAL {
+        <$concept_uri> skos:closeMatch ?dbpediaCloseMatch  FILTER(regex(str(?dbpediaCloseMatch), '^http://$dbpedia_domain', 'i'))
+      }
+    }";
+
+  // Get the DBPedia URIs for given concept.
+  try {
+    $rows = $glossary_store->query($query);
+  }
+  catch (Exception $e) {
+    watchdog('smart_glossary_dbpedia', 'Smart Glossary DBpedia: <pre>%errors</pre>', array('%errors' => $e->getMessage()), WATCHDOG_ERROR);
+    return array();
+  }
+
+  if ($rows->numRows() == 0) {
+    return array();
+  }
+
+  $dbpedia_uris = array();
+  foreach ($rows as $data) {
+    if (isset($data->dbpediaExactMatch)) {
+      $dbpedia_uris['exactMatch'][] = $data->dbpediaExactMatch->getUri();
+    }
+    if (isset($data->dbpediaCloseMatch)) {
+      $dbpedia_uris['closeMatch'][] = $data->dbpediaCloseMatch->getUri();
+    }
+  }
+
+  return smart_glossary_dbpedia_get_dbpedia_contents($dbpedia_domain, $dbpedia_uris, $selected_language);
+}
+
+/**
+ * Get the content from dbpedia.
+ *
+ * @param string $dbpedia_domain
+ *   The domain for the SPARQL endpoint.
+ * @param array $dbpedia_uris
+ *   An array with dbpedia URIs grouped by match type (close or exact match).
+ * @param string $language
+ *   The search language.
+ *
+ * @return array:
+ *   array(
+ *  'UNIQUE_NAME_1' => array(
+ *      'title' => title for this dataset,
+ *      'content' => array(
+ *        0 => array(
+ *          'label' => label for this definition (optional)
+ *          'definition' => external definition (mandatory)
+ *          'source' => name of the external source (optional)
+ *          'url' => link to the external source (optional)
+ *        ),
+ *        1 => array(...)
+ *      )
+ *   ),
+ *
+ *   'UNIQUE_NAME_2' => array(...)
+ *   )
+ */
+function smart_glossary_dbpedia_get_dbpedia_contents($dbpedia_domain, $dbpedia_uris, $language) {
+  if (empty($dbpedia_uris)) {
+    return array();
+  }
+
+  // Define SPARQL query template.
+  $query = "
+    PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#>
+    PREFIX onto:<http://dbpedia.org/ontology/>
+    PREFIX foaf:<http://xmlns.com/foaf/0.1/>
+
+    SELECT *
+    WHERE {
+      <[URI]> rdfs:label ?label FILTER (lang(?label) = '$language').
+      <[URI]> onto:abstract ?definition FILTER (lang(?definition) = '$language').
+      <[URI]> foaf:isPrimaryTopicOf ?url .
+    }";
+
+  $dbpedia_store = new EasyRdf_Sparql_Client('http://' . $dbpedia_domain . '/sparql');
+
+  // Go through the match property types [exactMatch | closeMatch]
+  $result = array();
+  foreach ($dbpedia_uris as $match_type => $uris) {
+    // Go through all found dbpedia URIs and check if data is available.
+    $uris = array_unique($uris);
+    foreach ($uris as $uri) {
+      try {
+        $rows = $dbpedia_store->query(str_replace('[URI]', $uri, $query));
+      }
+      catch (Exception $e) {
+        watchdog('smart_glossary_dbpedia', 'Smart Glossary DBpedia: <pre>%errors</pre>', array('%errors' => $e->getMessage()), WATCHDOG_ERROR);
+        return array();
+      }
+
+      if ($rows->numRows()) {
+        $row = $rows[0];
+        $result[$match_type]['resources'][] = array(
+          'uri' => $uri,
+          'label' => $row->label->getValue(),
+          'definition' => $row->definition->getValue(),
+          'url' => $row->url->getUri(),
+        );
+      }
+    }
+
+    // If resources found for the dbpedia URIs then add the rest of data.
+    if (isset($result[$match_type]['resources'])) {
+      $result[$match_type]['source'] = t('Wikipedia');
+      $result[$match_type]['title'] = ($match_type == 'exactMatch') ? t('Wikipedia definition:') : t('Wikipedia definition (similar term):');
+    }
+  }
+
+  return $result;
+}
