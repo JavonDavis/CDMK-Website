@@ -493,7 +493,7 @@ function editablefields_form_submit(&$form, &$form_state) {
   if (!isset($form_state['edit_mode'])) {
     $form_state['edit_mode'] = array();
   }
-  drupal_array_set_nested_value($form_state['edit_mode'], $parents, FALSE);
+  drupal_array_set_nested_value($form_state['edit_mode'], $parents, $element, FALSE);
 
   $entity = $form_state['editablefields_entities'][$element['#entity_type']][$element['#entity_id']];
 
